@@ -1,1 +1,1 @@
-# Hotel-Booking-dApp
+# Here lies the Hotel booking smart contract
