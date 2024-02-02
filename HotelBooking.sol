@@ -1,11 +1,21 @@
 // SPDX-License-Identifier: MIT
+
+
 pragma solidity ^0.8.0;
 
+error Not_Owner();
+error Room_Exists();
+error Invaid_RoomID();
+error Room_Is_Booked();
+error Insufficient_Funds();
+error No_Bookings_For_User();
+error Invalid_Booking();
+error Only_Guest();
 
 
 contract HotelBooking {
 
-    address public owner;
+    address public immutable owner;
 
     // Struct to represent a room
     struct Room {
@@ -33,7 +43,7 @@ contract HotelBooking {
     mapping(address => uint256[]) public userBookingHistory;
 
     // Mapping to store room IDs and their availability
-    mapping(uint256 => bool) public roomIdsMapping;
+    mapping(uint256 => bool) public Availability_By_RoomId;
 
     // Mapping to store booking IDs and their index in the dynamic array
     mapping(uint256 => uint256) public bookingIndex;
@@ -50,7 +60,7 @@ contract HotelBooking {
         uint256 roomId;
         uint256 amountPaid;
         bool isActive;
-        address guest; // Added to store the address of the guest who made the booking
+        address payable guest; // Added to store the address of the guest who made the booking
     }
 
     // Mapping to store bookings
@@ -59,8 +69,6 @@ contract HotelBooking {
     // Booking fee
     uint256 public bookingFee;
 
-    // Mapping of authorized addresses
-    mapping(address => bool) public authorizedAddresses;
 
     // Events to log important actions
     event RoomAdded(uint256 roomId, uint256 price);
@@ -69,32 +77,22 @@ contract HotelBooking {
     event BookingFeeSet(uint256 fee);
     event BookingCreated(address guest, uint256 roomId, uint256 amount, uint256 bookingId);
     event BookingCanceled(address guest, uint256 bookingId, uint256 refundAmount);
-    // Event to log ownership changes
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
-
-
-    // Owner-only modifier for access control
-    modifier onlyOwnerOrAuthorized() {
-        require(msg.sender == owner || authorizedAddresses[msg.sender], "Not authorized");
-        _;
-    }
+    
 
     // Owner-only modifier for access control
     modifier onlyOwner() {
-        require(msg.sender == owner, "Not authorized");
+        if(msg.sender != owner){revert Not_Owner();}
         _;
     }
 
-    // Constructor for HotelBooking, passing the initial owner to Ownable's constructor
     constructor() {
         owner = msg.sender;
-        // Your initialization code, if any
     }
 
     // Function to add a room (Owner only)
-    function addRoom(uint256 _roomId, uint256 _price) public onlyOwnerOrAuthorized {
+    function addRoom(uint256 _roomId, uint256 _price) public onlyOwner {
         // Check if the room already exists
-        require(rooms[_roomId].roomId == 0, "Room already exists");
+        if(rooms[_roomId].roomId != 0){revert Room_Exists();}
 
         // Add the room
         rooms[_roomId] = Room(_roomId, _price, false);
@@ -103,13 +101,13 @@ contract HotelBooking {
         roomIds.push(_roomId);
 
         // Update roomIdsMapping
-        roomIdsMapping[_roomId] = true;
+        Availability_By_RoomId[_roomId] = true;
         
         emit RoomAdded(_roomId, _price);
     }
 
     // Function to set supported currencies (Owner only)
-    function setSupportedCurrency(Currency _currency) public onlyOwnerOrAuthorized {
+    function setSupportedCurrency(Currency _currency) public onlyOwner {
         supportedCurrencies[_currency] = true;
         emit CurrencyAdded(_currency);
     }
@@ -120,13 +118,13 @@ contract HotelBooking {
     }
 
     // Function to set booking fee (Owner only)
-    function setBookingFee(uint256 _fee) public onlyOwnerOrAuthorized {
+    function setBookingFee(uint256 _fee) public onlyOwner {
         bookingFee = _fee;
         emit BookingFeeSet(_fee);
     }
 
     // Function to view bookings (Owner only)
-    function viewBookings() public view onlyOwnerOrAuthorized returns (Booking[] memory) {
+    function viewBookings() public view onlyOwner returns (Booking[] memory) {
     /***    uint256 activeBookingCount = 0;
 
     *   // Count the number of active bookings
@@ -164,7 +162,7 @@ contract HotelBooking {
     }
 
     // Function to view user booking history (Owner only)
-    function viewUserBookingHistory(address _user) public view onlyOwnerOrAuthorized returns (uint256[] memory) {
+    function viewUserBookingHistory(address _user) public view onlyOwner returns (uint256[] memory) {
         return userBookingHistory[_user];
     }
 
@@ -198,14 +196,14 @@ contract HotelBooking {
 
     // Function to create a booking
     function createBooking(uint256 _roomId) public payable {
-        require(rooms[_roomId].roomId != 0, "Invalid room ID");
-        require(!rooms[_roomId].isBooked, "Room is already booked");
+        if(rooms[_roomId].roomId == 0){revert Invaid_RoomID();}
+        if(rooms[_roomId].isBooked){revert Room_Is_Booked();}
 
         uint256 bookingId = userBookingHistory[msg.sender].length + 1;
         uint256 amountToPay = rooms[_roomId].price + bookingFee;
 
         // Deduct the amount from the user's balance
-        require(msg.value >= amountToPay, "Insufficient funds sent");
+        if(msg.value < amountToPay){revert Insufficient_Funds();}
         balances[msg.sender] -= amountToPay;
 
         // Add the amount to the owner's balance (replace 'owner()' with the actual owner's address)
@@ -221,7 +219,7 @@ contract HotelBooking {
         rooms[_roomId].isBooked = true;
 
         // Record the booking details
-        bookings[bookingId] = Booking(bookingId, _roomId, amountToPay, true, msg.sender);
+        bookings[bookingId] = Booking(bookingId, _roomId, amountToPay, true, payable(msg.sender));
 
         // Update user booking history
         userBookingHistory[msg.sender].push(bookingId);
@@ -231,7 +229,7 @@ contract HotelBooking {
 
     // Function to get details of the most recent booking for the caller
     function getRecentBookingDetails() public view returns (Booking memory) {
-        require(userBookingHistory[msg.sender].length > 0, "No bookings for the user");
+        if(userBookingHistory[msg.sender].length == 0){revert No_Bookings_For_User();}
 
         // Retrieve the most recent booking ID for the caller
         uint256 mostRecentBookingId = userBookingHistory[msg.sender][userBookingHistory[msg.sender].length - 1];
@@ -243,8 +241,8 @@ contract HotelBooking {
 
     // Function to cancel a booking
     function cancelBooking(uint256 _bookingId) public {
-        require(bookings[_bookingId].isActive, "Booking does not exist or already canceled");
-        require(msg.sender == bookings[_bookingId].guest, "Only the guest can cancel the booking");
+        if(!bookings[_bookingId].isActive){revert Invalid_Booking();}
+        if(msg.sender != bookings[_bookingId].guest){revert Only_Guest();}
 
         uint256 refundAmount = rooms[bookings[_bookingId].roomId].price;
 
@@ -257,25 +255,7 @@ contract HotelBooking {
         emit BookingCanceled(msg.sender, _bookingId, refundAmount);
     }
 
-    // Function to check if the caller is authorized
-    function isAuthorized(address _caller) public view onlyOwnerOrAuthorized returns (bool) {
-        return authorizedAddresses[_caller];
-    }
+    
 
-    // Function to add an authorized address (Owner only)
-    function addAuthorizedAddress(address _authorizedAddress) public onlyOwner {
-        authorizedAddresses[_authorizedAddress] = true;
-    }
-
-    // Function to remove an authorized address (Owner only)
-    function removeAuthorizedAddress(address _authorizedAddress) public onlyOwner {
-        authorizedAddresses[_authorizedAddress] = false;
-    }
-
-    // Function to transfer ownership
-    function transferOwnership(address newOwner) external {
-        require(msg.sender == owner, "Only the current owner can transfer ownership");
-        emit OwnershipTransferred(owner, newOwner);
-        owner = newOwner;
-    }
+   
 }
